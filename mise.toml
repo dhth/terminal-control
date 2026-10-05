@@ -1,0 +1,16 @@
+[settings]
+task.run_auto_install = false
+
+[tools]
+rust = { version = "1.93.1", profile = "minimal", components = ["rustfmt", "clippy"], targets = ["x86_64-unknown-linux-musl"] }
+zig = "0.15.2"
+
+[tasks."build:release"]
+alias = "b:r"
+description = "Build the release binary"
+run = "cargo build --release"
+
+[tasks."build:release-musl"]
+alias = "b:rm"
+description = "Build the static Linux x64 release binary"
+run = "cargo build --release --target x86_64-unknown-linux-musl"

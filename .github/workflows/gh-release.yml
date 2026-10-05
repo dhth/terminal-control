@@ -1,0 +1,67 @@
+name: GitHub release
+
+on:
+  push:
+    tags:
+      - "musl-v*-r*"
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v5
+      - uses: jdx/mise-action@v4
+      - name: Build static binary
+        run: mise run build:release-musl
+      - name: Verify and package binary
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          if [[ ! "$GITHUB_REF_NAME" =~ ^musl-v([0-9]+\.[0-9]+\.[0-9]+)-r([0-9]+)$ ]]; then
+            echo "invalid release tag: $GITHUB_REF_NAME" >&2
+            exit 1
+          fi
+
+          version="${BASH_REMATCH[1]}"
+          binary="target/x86_64-unknown-linux-musl/release/termctrl"
+          binary_version="$("$binary" --version | awk '{print $2}')"
+          if [[ "$binary_version" != "$version" ]]; then
+            echo "tag version $version does not match termctrl $binary_version" >&2
+            exit 1
+          fi
+
+          file "$binary" | tee /dev/stderr | grep -Eq "static(-pie)? linked"
+          if readelf -l "$binary" | grep -q "Requesting program interpreter"; then
+            echo "release binary has a dynamic interpreter" >&2
+            exit 1
+          fi
+          if readelf -d "$binary" | grep -q "(NEEDED)"; then
+            echo "release binary has dynamic library dependencies" >&2
+            exit 1
+          fi
+
+          "$binary" -h >/dev/null
+          [[ "$("$binary" show -- sh -c 'printf hello')" == "hello" ]]
+
+          artifact="termctrl-${version}-linux-x86_64-musl"
+          mkdir -p "dist/$artifact"
+          install -m 755 "$binary" "dist/$artifact/termctrl"
+          install -m 644 LICENSE THIRD_PARTY_LICENSES.md "dist/$artifact/"
+          tar -C dist -czf "dist/$artifact.tar.gz" "$artifact"
+          (
+            cd dist
+            sha256sum "$artifact.tar.gz" >"$artifact.tar.gz.sha256"
+          )
+      - name: Create GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "$GITHUB_REF_NAME" \
+            dist/*.tar.gz \
+            dist/*.sha256 \
+            --title "$GITHUB_REF_NAME" \
+            --notes "Statically linked Linux x86_64 musl build of termctrl from $GITHUB_SHA."
